@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HealthBridge Portal</title>
+  <link rel="stylesheet" href="/css/styles.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0" rel="stylesheet">
+</head>
+<body>
+
+  <!-- ============================================================ -->
+  <!-- Loading Screen -->
+  <!-- ============================================================ -->
+  <div id="loading-screen" class="loading-screen">
+    <div class="loading-content">
+      <div class="loading-logo">
+        <span class="material-symbols-outlined">local_hospital</span>
+      </div>
+      <h2>HealthBridge</h2>
+      <div class="loading-spinner"></div>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- Auth Views (Login, Register, Reset) -->
+  <!-- ============================================================ -->
+  <div id="auth-container" class="auth-container hidden">
+    <!-- Login Form -->
+    <div id="login-view" class="auth-card">
+      <div class="auth-header">
+        <span class="material-symbols-outlined auth-logo">local_hospital</span>
+        <h1>HealthBridge</h1>
+        <p>Patient-Doctor Portal</p>
+      </div>
+      <form id="login-form" class="auth-form">
+        <div class="form-group">
+          <label for="login-email">Email Address</label>
+          <div class="input-icon">
+            <span class="material-symbols-outlined">mail</span>
+            <input type="email" id="login-email" placeholder="Enter your email" required>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="login-password">Password</label>
+          <div class="input-icon">
+            <span class="material-symbols-outlined">lock</span>
+            <input type="password" id="login-password" placeholder="Enter your password" required>
+          </div>
+        </div>
+        <div id="login-error" class="form-error hidden"></div>
+        <button type="submit" class="btn btn-primary btn-block">
+          <span class="material-symbols-outlined">login</span>
+          Sign In
+        </button>
+        <div class="auth-links">
+          <a href="#" id="show-forgot-password">Forgot password?</a>
+          <a href="#" id="show-register">Create an account</a>
+        </div>
+      </form>
+
+      <!-- 2FA Verification -->
+      <div id="twofa-section" class="hidden">
+        <h3>Two-Factor Authentication</h3>
+        <p>Enter the 6-digit code from your authenticator app.</p>
+        <form id="twofa-form" class="auth-form">
+          <div class="form-group">
+            <div class="input-icon">
+              <span class="material-symbols-outlined">pin</span>
+              <input type="text" id="twofa-code" maxlength="6" pattern="[0-9]{6}" placeholder="000000" required>
+            </div>
+          </div>
+          <div id="twofa-error" class="form-error hidden"></div>
+          <button type="submit" class="btn btn-primary btn-block">Verify Code</button>
+        </form>
+      </div>
+
+      <div class="auth-demo-info">
+        <h4>Demo Credentials</h4>
+        <p><strong>Admin:</strong> admin@healthbridge.com</p>
+        <p><strong>Doctor:</strong> dr.chen@healthbridge.com</p>
+        <p><strong>Patient:</strong> john.doe@email.com</p>
+        <p><strong>Password:</strong> Password123</p>
+      </div>
+    </div>
+
+    <!-- Register Form -->
+    <div id="register-view" class="auth-card hidden">
+      <div class="auth-header">
+        <span class="material-symbols-outlined auth-logo">local_hospital</span>
+        <h1>Create Account</h1>
+        <p>Join HealthBridge Portal</p>
+      </div>
+      <form id="register-form" class="auth-form">
+        <div class="form-row">
+          <div class="form-group">
+            <label for="reg-first-name">First Name</label>
+            <input type="text" id="reg-first-name" placeholder="First name" required>
+          </div>
+          <div class="form-group">
+            <label for="reg-last-name">Last Name</label>
+            <input type="text" id="reg-last-name" placeholder="Last name" required>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="reg-email">Email Address</label>
+          <div class="input-icon">
+            <span class="material-symbols-outlined">mail</span>
+            <input type="email" id="reg-email" placeholder="your@email.com" required>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="reg-password">Password</label>
+          <div class="input-icon">
+            <span class="material-symbols-outlined">lock</span>
+            <input type="password" id="reg-password" placeholder="Min 8 chars, upper+lower+number" required minlength="8">
+          </div>
+          <div class="password-strength" id="password-strength"></div>
+        </div>
+        <div class="form-group">
+          <label for="reg-confirm-password">Confirm Password</label>
+          <div class="input-icon">
+            <span class="material-symbols-outlined">lock</span>
+            <input type="password" id="reg-confirm-password" placeholder="Confirm your password" required>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="reg-role">I am a</label>
+          <select id="reg-role" required>
+            <option value="patient">Patient</option>
+            <option value="doctor">Doctor/Physician</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="reg-phone">Phone Number</label>
+          <div class="input-icon">
+            <span class="material-symbols-outlined">phone</span>
+            <input type="tel" id="reg-phone" placeholder="(xxx) xxx-xxxx">
+          </div>
+        </div>
+        <div id="register-error" class="form-error hidden"></div>
+        <button type="submit" class="btn btn-primary btn-block">
+          <span class="material-symbols-outlined">person_add</span>
+          Create Account
+        </button>
+        <div class="auth-links">
+          <a href="#" id="show-login-from-register">Already have an account? Sign in</a>
+        </div>
+      </form>
+    </div>
+
+    <!-- Forgot Password Form -->
+    <div id="forgot-view" class="auth-card hidden">
+      <div class="auth-header">
+        <span class="material-symbols-outlined auth-logo">lock_reset</span>
+        <h1>Reset Password</h1>
+        <p>Enter your email to receive a reset link</p>
+      </div>
+      <form id="forgot-form" class="auth-form">
+        <div class="form-group">
+          <label for="forgot-email">Email Address</label>
+          <div class="input-icon">
+            <span class="material-symbols-outlined">mail</span>
+            <input type="email" id="forgot-email" placeholder="Enter your email" required>
+          </div>
+        </div>
+        <div id="forgot-message" class="form-message hidden"></div>
+        <button type="submit" class="btn btn-primary btn-block">Send Reset Link</button>
+        <div class="auth-links">
+          <a href="#" id="show-login-from-forgot">Back to Sign In</a>
+        </div>
+      </form>
+
+      <!-- Reset with token -->
+      <div id="reset-section" class="hidden">
+        <form id="reset-form" class="auth-form">
+          <div class="form-group">
+            <label for="reset-token">Reset Token</label>
+            <input type="text" id="reset-token" placeholder="Paste your reset token" required>
+          </div>
+          <div class="form-group">
+            <label for="reset-password">New Password</label>
+            <div class="input-icon">
+              <span class="material-symbols-outlined">lock</span>
+              <input type="password" id="reset-password" placeholder="Enter new password" required minlength="8">
+            </div>
+          </div>
+          <div id="reset-error" class="form-error hidden"></div>
+          <button type="submit" class="btn btn-primary btn-block">Reset Password</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- Main Application Shell -->
+  <!-- ============================================================ -->
+  <div id="app-container" class="app-container hidden">
+    <!-- Sidebar Navigation -->
+    <nav id="sidebar" class="sidebar">
+      <div class="sidebar-header">
+        <span class="material-symbols-outlined">local_hospital</span>
+        <h2>HealthBridge</h2>
+        <button id="sidebar-toggle" class="sidebar-toggle">
+          <span class="material-symbols-outlined">menu</span>
+        </button>
+      </div>
+
+      <div class="sidebar-user">
+        <div class="user-avatar" id="sidebar-avatar">
+          <span class="material-symbols-outlined">person</span>
+        </div>
+        <div class="user-info">
+          <span class="user-name" id="sidebar-name"></span>
+          <span class="user-role" id="sidebar-role"></span>
+        </div>
+      </div>
+
+      <ul class="nav-menu" id="nav-menu">
+        <!-- Populated dynamically based on role -->
+      </ul>
+
+      <div class="sidebar-footer">
+        <button id="logout-btn" class="btn btn-outline btn-block">
+          <span class="material-symbols-outlined">logout</span>
+          Sign Out
+        </button>
+      </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="main-content">
+      <!-- Top Bar -->
+      <header class="top-bar">
+        <button id="mobile-menu-toggle" class="mobile-menu-toggle">
+          <span class="material-symbols-outlined">menu</span>
+        </button>
+        <div class="search-bar">
+          <span class="material-symbols-outlined">search</span>
+          <input type="text" id="global-search" placeholder="Search patients, appointments, medications...">
+          <div id="search-results-dropdown" class="search-dropdown hidden"></div>
+        </div>
+        <div class="top-bar-actions">
+          <button id="notifications-btn" class="icon-btn" title="Notifications">
+            <span class="material-symbols-outlined">notifications</span>
+            <span id="notification-badge" class="badge hidden">0</span>
+          </button>
+          <button id="profile-btn" class="icon-btn" title="Profile">
+            <span class="material-symbols-outlined">account_circle</span>
+          </button>
+        </div>
+      </header>
+
+      <!-- Page Content Area -->
+      <div id="page-content" class="page-content">
+        <!-- Dynamic content loaded here by JS modules -->
+      </div>
+    </main>
+
+    <!-- Notifications Panel -->
+    <div id="notifications-panel" class="notifications-panel hidden">
+      <div class="panel-header">
+        <h3>Notifications</h3>
+        <button id="mark-all-read-btn" class="btn btn-sm btn-outline">Mark All Read</button>
+      </div>
+      <div id="notifications-list" class="notifications-list">
+        <!-- Populated dynamically -->
+      </div>
+    </div>
+
+    <!-- Modal Overlay -->
+    <div id="modal-overlay" class="modal-overlay hidden">
+      <div id="modal-container" class="modal-container">
+        <div class="modal-header">
+          <h3 id="modal-title"></h3>
+          <button id="modal-close" class="modal-close">
+            <span class="material-symbols-outlined">close</span>
+          </button>
+        </div>
+        <div id="modal-body" class="modal-body">
+          <!-- Modal content -->
+        </div>
+      </div>
+    </div>
+
+    <!-- Toast Notifications -->
+    <div id="toast-container" class="toast-container"></div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- JavaScript Modules -->
+  <!-- ============================================================ -->
+  <script src="/js/app.js"></script>
+  <script src="/js/auth.js"></script>
+  <script src="/js/dashboard.js"></script>
+  <script src="/js/appointments.js"></script>
+  <script src="/js/messages.js"></script>
+  <script src="/js/patients.js"></script>
+  <script src="/js/prescriptions.js"></script>
+  <script src="/js/billing.js"></script>
+  <script src="/js/labresults.js"></script>
+  <script src="/js/profile.js"></script>
+  <script src="/js/notifications.js"></script>
+  <script src="/js/search.js"></script>
+
+</body>
+</html>
