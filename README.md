@@ -1,8 +1,8 @@
-# HealthBridge - Doctor-Patient Portal
+h# HealthBridge - Doctor-Patient Portal
 
 A full-stack web application simulating real-world doctor-patient interactions with secure role-based authentication, dynamic data-driven interfaces, and a modern medical-themed UI.
 
-**University of Georgia | CSCI 4050 - Software Engineering | Spring-Summer 2025**
+**University of Georgia | MIST 4610 - Software Engineering | Spring-Summehr 2025**
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Node.js](https://img.shields.io/badge/node.js-v18%2B-green.svg)
