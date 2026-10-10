@@ -113,6 +113,12 @@ const AuthModule = (() => {
           body: payload,
         });
 
+        if (data.pendingApproval) {
+          // Doctor accounts are created disabled until an admin activates them.
+          App.showToast(data.message, 'info');
+          return;
+        }
+
         App.showApp(data.user);
         App.showToast('Account created successfully! Welcome to HealthBridge.', 'success');
       } catch (err) {

@@ -8,6 +8,15 @@ const { body, validationResult } = require('express-validator');
 const User = require('../models/User');
 const { isAuthenticated, rateLimitLogin, logAction } = require('../middleware/auth');
 
+// Issue a fresh session ID whenever the privilege level of a session changes
+// (login), so a session ID planted before login is useless after it
+// (session fixation; NIST SC-23).
+function regenerateSession(req) {
+  return new Promise((resolve, reject) => {
+    req.session.regenerate(err => (err ? reject(err) : resolve()));
+  });
+}
+
 // ============================================================
 // POST /api/auth/register - Create new account
 // ============================================================
@@ -30,11 +39,26 @@ router.post('/register', [
       return res.status(409).json({ error: 'An account with this email already exists.' });
     }
 
-    const user = await User.create(req.body);
+    // AC-2: anyone can self-register as a patient, but a self-registered
+    // doctor account (which can read PHI) starts disabled until an admin
+    // reviews and activates it.
+    const isDoctor = req.body.role === 'doctor';
+    const user = await User.create({ ...req.body, is_active: !isDoctor });
+
+    if (isDoctor) {
+      logAction(user.id, 'REGISTER_PENDING_APPROVAL', 'users', user.id,
+        'New doctor account created; awaiting admin activation', req.ip);
+      return res.status(201).json({
+        message: 'Doctor account created. An administrator must approve it before you can sign in.',
+        pendingApproval: true,
+        user: { id: user.id, email: user.email, role: user.role },
+      });
+    }
 
     logAction(user.id, 'REGISTER', 'users', user.id, `New ${req.body.role} account created`, req.ip);
 
     // Auto-login after registration
+    await regenerateSession(req);
     req.session.userId = user.id;
     req.session.role = user.role;
     req.session.lastActivity = Date.now();
@@ -72,20 +96,38 @@ router.post('/login', rateLimitLogin, [
     const user = User.findByEmail(email);
 
     if (!user) {
+      // AU-2: failed attempts are audited even for unknown accounts.
+      logAction(null, 'LOGIN_FAILED', 'users', null, `Failed login attempt for unknown account ${email}`, req.ip);
       return res.status(401).json({ error: 'Invalid email or password.' });
     }
 
-    if (!user.is_active) {
-      return res.status(403).json({ error: 'This account has been deactivated. Contact an administrator.' });
+    // AC-7: per-account lockout, independent of the per-IP rate limiter.
+    if (User.isLocked(user)) {
+      logAction(user.id, 'LOGIN_LOCKED', 'users', user.id, 'Login attempted while account locked', req.ip);
+      return res.status(423).json({ error: 'Account temporarily locked after repeated failed logins. Try again later.' });
     }
 
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
-      logAction(null, 'LOGIN_FAILED', 'users', null, `Failed login attempt for ${email}`, req.ip);
+      const locked = User.recordFailedLogin(user.id);
+      logAction(user.id, 'LOGIN_FAILED', 'users', user.id, `Failed login attempt for ${email}`, req.ip);
+      if (locked) {
+        logAction(user.id, 'ACCOUNT_LOCKED', 'users', user.id,
+          `Locked after ${User.MAX_FAILED_LOGINS} consecutive failed logins`, req.ip);
+      }
       return res.status(401).json({ error: 'Invalid email or password.' });
     }
 
-    // Set session
+    // Checked after the password so the response does not reveal whether a
+    // disabled account exists to someone who does not know its password.
+    if (!user.is_active) {
+      return res.status(403).json({ error: 'This account is not active. Contact an administrator.' });
+    }
+
+    User.clearFailedLogins(user.id);
+
+    // Set session (new session ID first; SC-23)
+    await regenerateSession(req);
     req.session.userId = user.id;
     req.session.role = user.role;
     req.session.lastActivity = Date.now();
@@ -150,9 +192,17 @@ router.post('/verify-2fa', [
     });
 
     if (!verified) {
+      const locked = User.recordFailedLogin(user.id);
+      logAction(user.id, 'LOGIN_2FA_FAILED', 'users', user.id, 'Invalid 2FA code', req.ip);
+      if (locked) {
+        logAction(user.id, 'ACCOUNT_LOCKED', 'users', user.id,
+          `Locked after ${User.MAX_FAILED_LOGINS} consecutive failed attempts`, req.ip);
+        req.session.destroy(() => {});
+      }
       return res.status(401).json({ error: 'Invalid verification code.' });
     }
 
+    User.clearFailedLogins(user.id);
     req.session.twoFactorVerified = true;
     User.updateLastLogin(user.id);
     logAction(user.id, 'LOGIN_2FA_VERIFIED', 'users', user.id, '2FA verification successful', req.ip);
@@ -258,7 +308,7 @@ router.post('/disable-2fa', isAuthenticated, [
 // ============================================================
 // POST /api/auth/forgot-password - Request password reset
 // ============================================================
-router.post('/forgot-password', [
+router.post('/forgot-password', rateLimitLogin, [
   body('email').isEmail().normalizeEmail(),
 ], (req, res) => {
   try {
@@ -280,13 +330,14 @@ router.post('/forgot-password', [
     User.setResetToken(user.id, token, expires);
     logAction(user.id, 'PASSWORD_RESET_REQUEST', 'users', user.id, 'Password reset requested', req.ip);
 
-    // In production, send an email with the reset link
-    // For demo purposes, we return the token
-    res.json({
-      message: 'If an account with that email exists, a reset link has been sent.',
-      // DEV ONLY - remove in production:
-      _dev_reset_token: token,
-    });
+    // There is no mail server in this demo. Outside production the token is
+    // returned so the flow can be exercised; in production it never leaves
+    // the server (it would be emailed). Only its SHA-256 digest is stored.
+    const response = { message: 'If an account with that email exists, a reset link has been sent.' };
+    if (process.env.NODE_ENV !== 'production') {
+      response._dev_reset_token = token;
+    }
+    res.json(response);
   } catch (err) {
     console.error('Forgot password error:', err);
     res.status(500).json({ error: 'Password reset request failed.' });
@@ -296,7 +347,7 @@ router.post('/forgot-password', [
 // ============================================================
 // POST /api/auth/reset-password - Reset password with token
 // ============================================================
-router.post('/reset-password', [
+router.post('/reset-password', rateLimitLogin, [
   body('token').notEmpty().withMessage('Reset token is required'),
   body('password').isLength({ min: 8 })
     .matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/).withMessage('Password must contain uppercase, lowercase, and number'),
@@ -314,6 +365,7 @@ router.post('/reset-password', [
 
     await User.updatePassword(user.id, req.body.password);
     User.clearResetToken(user.id);
+    User.clearFailedLogins(user.id);
     logAction(user.id, 'PASSWORD_RESET', 'users', user.id, 'Password reset completed', req.ip);
 
     res.json({ message: 'Password reset successful. You can now log in with your new password.' });

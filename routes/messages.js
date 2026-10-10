@@ -146,7 +146,21 @@ router.get('/:id', (req, res) => {
 // ============================================================
 router.get('/:id/thread', (req, res) => {
   try {
-    const thread = Message.getThread(parseInt(req.params.id));
+    // AC-3: only participants (or an admin) may read a thread. Previously any
+    // logged-in user could read any conversation by guessing a message id.
+    const message = Message.findById(parseInt(req.params.id));
+    if (!message) {
+      return res.status(404).json({ error: 'Message not found.' });
+    }
+    const isParticipant = message.sender_id === req.user.id || message.recipient_id === req.user.id;
+    if (!isParticipant && req.user.role !== 'admin') {
+      logAction(req.user.id, 'ACCESS_DENIED', 'messages', message.id,
+        `Denied read of message thread ${message.id}`, req.ip);
+      return res.status(403).json({ error: 'Access denied.' });
+    }
+
+    const thread = Message.getThread(message.id).filter(m =>
+      req.user.role === 'admin' || m.sender_id === req.user.id || m.recipient_id === req.user.id);
     res.json({ messages: thread });
   } catch (err) {
     console.error('Get thread error:', err);

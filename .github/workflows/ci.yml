@@ -22,13 +22,16 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=moderate
+
       - name: Seed the database
         env:
           SESSION_SECRET: ci-test-secret
           NODE_ENV: test
         run: npm run seed
 
-      - name: Run test suite (21 tests)
+      - name: Run test suite
         env:
           SESSION_SECRET: ci-test-secret
           NODE_ENV: test

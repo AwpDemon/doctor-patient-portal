@@ -7,6 +7,9 @@ const testDbPath = path.join(__dirname, '..', 'data', 'test.db');
 process.env.DB_PATH = testDbPath;
 process.env.NODE_ENV = 'test';
 process.env.SESSION_SECRET = 'test-secret';
+// This file exercises many logins from one IP; the limiter itself is tested
+// in tests/security.test.js with its real (low) limit.
+process.env.LOGIN_RATE_MAX = '1000';
 
 // Remove old test DB before importing app (which initializes DB)
 try { fs.unlinkSync(testDbPath); } catch (e) { /* ignore */ }
@@ -66,6 +69,8 @@ describe('Auth Routes', () => {
 
       expect(res.statusCode).toBe(201);
       expect(res.body.user.role).toBe('doctor');
+      // Self-registered doctors start disabled until an admin approves them.
+      expect(res.body.pendingApproval).toBe(true);
     });
 
     it('should reject duplicate email', async () => {

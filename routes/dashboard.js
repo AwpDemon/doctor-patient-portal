@@ -4,7 +4,7 @@ const User = require('../models/User');
 const Appointment = require('../models/Appointment');
 const Message = require('../models/Message');
 const Prescription = require('../models/Prescription');
-const { isAuthenticated, requireRole } = require('../middleware/auth');
+const { isAuthenticated, requireRole, logAction, verifyAuditChain } = require('../middleware/auth');
 const { getDatabase } = require('../config/db');
 
 router.use(isAuthenticated);
@@ -101,13 +101,22 @@ router.get('/search', (req, res) => {
     const searchTerm = `%${q.trim()}%`;
     const results = { patients: [], doctors: [], appointments: [], prescriptions: [] };
 
-    if (req.user.role === 'doctor' || req.user.role === 'admin') {
+    if (req.user.role === 'admin') {
       results.patients = db.prepare(`
         SELECT id, first_name, last_name, email, phone
         FROM users WHERE role = 'patient' AND is_active = 1
         AND (first_name LIKE ? OR last_name LIKE ? OR email LIKE ?)
         LIMIT 10
       `).all(searchTerm, searchTerm, searchTerm);
+    } else if (req.user.role === 'doctor') {
+      // AC-3 / minimum necessary: doctors only find their own patients.
+      results.patients = db.prepare(`
+        SELECT id, first_name, last_name, email, phone
+        FROM users WHERE role = 'patient' AND is_active = 1
+        AND id IN (SELECT patient_id FROM appointments WHERE doctor_id = ?)
+        AND (first_name LIKE ? OR last_name LIKE ? OR email LIKE ?)
+        LIMIT 10
+      `).all(req.user.id, searchTerm, searchTerm, searchTerm);
     }
 
     if (req.user.role === 'patient' || req.user.role === 'admin') {
@@ -186,11 +195,17 @@ router.put('/admin/users/:id/toggle-active', requireRole('admin'), (req, res) =>
     if (!user) {
       return res.status(404).json({ error: 'User not found.' });
     }
+    if (user.id === req.user.id) {
+      return res.status(400).json({ error: 'Administrators cannot deactivate their own account.' });
+    }
     if (user.is_active) {
       User.deactivate(user.id);
     } else {
       User.activate(user.id);
     }
+    // AC-2(4): account enable/disable is audited.
+    logAction(req.user.id, user.is_active ? 'USER_DEACTIVATED' : 'USER_ACTIVATED', 'users', user.id,
+      `${user.role} account ${user.email} ${user.is_active ? 'deactivated' : 'activated'}`, req.ip);
     res.json({ message: `User ${user.is_active ? 'deactivated' : 'activated'}.` });
   } catch (err) {
     console.error('Toggle user active error:', err);
@@ -210,7 +225,7 @@ router.get('/admin/audit-log', requireRole('admin'), (req, res) => {
       SELECT al.*, u.first_name, u.last_name, u.email
       FROM audit_log al
       LEFT JOIN users u ON al.user_id = u.id
-      ORDER BY al.created_at DESC
+      ORDER BY al.id DESC
       LIMIT ?
     `).all(limit);
 
@@ -218,6 +233,21 @@ router.get('/admin/audit-log', requireRole('admin'), (req, res) => {
   } catch (err) {
     console.error('Get audit log error:', err);
     res.status(500).json({ error: 'Failed to retrieve audit log.' });
+  }
+});
+
+// ============================================================
+// GET /api/dashboard/admin/audit-log/verify - Check audit hash chain (AU-9)
+// ============================================================
+router.get('/admin/audit-log/verify', requireRole('admin'), (req, res) => {
+  try {
+    const result = verifyAuditChain();
+    logAction(req.user.id, 'AUDIT_CHAIN_VERIFIED', 'audit_log', null,
+      `Audit chain check: ok=${result.ok}, rows=${result.checked}`, req.ip);
+    res.json(result);
+  } catch (err) {
+    console.error('Verify audit log error:', err);
+    res.status(500).json({ error: 'Failed to verify audit log.' });
   }
 });
 
@@ -335,7 +365,7 @@ function getAdminDashboard(db) {
     SELECT al.*, u.first_name, u.last_name
     FROM audit_log al
     LEFT JOIN users u ON al.user_id = u.id
-    ORDER BY al.created_at DESC
+    ORDER BY al.id DESC
     LIMIT 10
   `).all();
 

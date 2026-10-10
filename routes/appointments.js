@@ -216,7 +216,19 @@ router.put('/:id', (req, res) => {
       return res.status(403).json({ error: 'Access denied.' });
     }
 
-    const updated = Appointment.update(parseInt(req.params.id), req.body);
+    // AC-6 / HIPAA 164.312(c)(1) integrity: patients may reschedule or edit
+    // their reason for visit, but clinical fields (status, notes) are
+    // doctor/admin-only.
+    const PATIENT_EDITABLE = ['date', 'time', 'reason'];
+    const updates = req.user.role === 'patient'
+      ? Object.fromEntries(Object.entries(req.body).filter(([k]) => PATIENT_EDITABLE.includes(k)))
+      : req.body;
+    const rejected = Object.keys(req.body).filter(k => !(k in updates));
+    if (rejected.length > 0) {
+      return res.status(403).json({ error: `Patients cannot change: ${rejected.join(', ')}.` });
+    }
+
+    const updated = Appointment.update(parseInt(req.params.id), updates);
     logAction(req.user.id, 'UPDATE_APPOINTMENT', 'appointments', parseInt(req.params.id),
       `Appointment updated`, req.ip);
 
@@ -239,6 +251,10 @@ router.put('/:id/cancel', (req, res) => {
     }
 
     if (req.user.role === 'patient' && appointment.patient_id !== req.user.id) {
+      return res.status(403).json({ error: 'Access denied.' });
+    }
+    // AC-3: a doctor can only cancel their own appointments.
+    if (req.user.role === 'doctor' && appointment.doctor_id !== req.user.id) {
       return res.status(403).json({ error: 'Access denied.' });
     }
 

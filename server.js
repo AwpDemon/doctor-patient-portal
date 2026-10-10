@@ -24,9 +24,26 @@ const PORT = process.env.PORT || 3000;
 // Middleware
 // ============================================================
 
-// Security headers
+// Security headers, including a Content-Security-Policy (SC-18 / SI-10 defense
+// in depth). Scripts may only load from this origin. The UI still uses inline
+// onclick="" attributes, so script-src-attr allows them; removing that
+// allowance requires refactoring those handlers (listed as a gap in
+// docs/CONTROL_MAPPING.md).
 app.use(helmet({
-  contentSecurityPolicy: false, // Allow inline scripts for SPA
+  contentSecurityPolicy: {
+    useDefaults: true,
+    directives: {
+      'default-src': ["'self'"],
+      'script-src': ["'self'"],
+      'script-src-attr': ["'unsafe-inline'"],
+      'style-src': ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+      'font-src': ["'self'", 'https://fonts.gstatic.com'],
+      'img-src': ["'self'", 'data:'],
+      'connect-src': ["'self'"],
+      'object-src': ["'none'"],
+      'frame-ancestors': ["'none'"],
+    },
+  },
 }));
 
 // CORS
@@ -45,16 +62,20 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Session management
-const SQLiteStore = require('connect-sqlite3')(session);
+// IA-5 / SC-12: refuse to run in production with the published fallback
+// secret, which would let anyone forge session cookies.
+const DEV_SESSION_SECRET = 'healthbridge-dev-secret-change-in-production';
+if (process.env.NODE_ENV === 'production' &&
+    (!process.env.SESSION_SECRET || process.env.SESSION_SECRET === DEV_SESSION_SECRET)) {
+  throw new Error('SESSION_SECRET must be set to a unique value when NODE_ENV=production.');
+}
+
+const SqliteSessionStore = require('./config/sessionStore');
 
 app.use(session({
-  store: new SQLiteStore({
-    db: 'sessions.db',
-    dir: path.join(__dirname, 'data'),
-    concurrentDB: true,
-  }),
+  store: new SqliteSessionStore(),
   name: 'healthbridge.sid',
-  secret: process.env.SESSION_SECRET || 'healthbridge-dev-secret-change-in-production',
+  secret: process.env.SESSION_SECRET || DEV_SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
   cookie: {

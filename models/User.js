@@ -1,5 +1,16 @@
 const { getDatabase } = require('../config/db');
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
+
+// Reset tokens are stored as SHA-256 digests, so a copy of the database does
+// not hand out working reset links (IA-5).
+function hashToken(token) {
+  return crypto.createHash('sha256').update(String(token)).digest('hex');
+}
+
+// AC-7 account lockout policy
+const MAX_FAILED_LOGINS = parseInt(process.env.MAX_FAILED_LOGINS, 10) || 5;
+const LOCKOUT_MS = parseInt(process.env.LOCKOUT_MS, 10) || 15 * 60 * 1000;
 
 class User {
   static findById(id) {
@@ -35,8 +46,8 @@ class User {
     const stmt = db.prepare(`
       INSERT INTO users (email, password, first_name, last_name, role, phone,
                          date_of_birth, gender, address, specialty, license_number,
-                         insurance_id, emergency_contact, emergency_phone)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         insurance_id, emergency_contact, emergency_phone, is_active)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     const result = stmt.run(
@@ -53,7 +64,8 @@ class User {
       userData.license_number || null,
       userData.insurance_id || null,
       userData.emergency_contact || null,
-      userData.emergency_phone || null
+      userData.emergency_phone || null,
+      userData.is_active === false ? 0 : 1
     );
 
     return User.findById(result.lastInsertRowid);
@@ -101,15 +113,40 @@ class User {
   static setResetToken(userId, token, expires) {
     const db = getDatabase();
     db.prepare('UPDATE users SET password_reset_token = ?, password_reset_expires = ? WHERE id = ?')
-      .run(token, expires, userId);
+      .run(hashToken(token), expires, userId);
   }
 
   static findByResetToken(token) {
     const db = getDatabase();
+    // Expiry is stored as an ISO-8601 string; compare against the same format.
     return db.prepare(`
       SELECT * FROM users
-      WHERE password_reset_token = ? AND password_reset_expires > datetime('now')
-    `).get(token);
+      WHERE password_reset_token = ? AND password_reset_expires > ?
+    `).get(hashToken(token), new Date().toISOString());
+  }
+
+  // ---- AC-7 account lockout ------------------------------------------
+  static isLocked(user) {
+    return Boolean(user && user.locked_until && new Date(user.locked_until).getTime() > Date.now());
+  }
+
+  // Returns true if this failure locked the account.
+  static recordFailedLogin(userId) {
+    const db = getDatabase();
+    const row = db.prepare('SELECT failed_login_count FROM users WHERE id = ?').get(userId);
+    const count = ((row && row.failed_login_count) || 0) + 1;
+    if (count >= MAX_FAILED_LOGINS) {
+      const until = new Date(Date.now() + LOCKOUT_MS).toISOString();
+      db.prepare('UPDATE users SET failed_login_count = 0, locked_until = ? WHERE id = ?').run(until, userId);
+      return true;
+    }
+    db.prepare('UPDATE users SET failed_login_count = ? WHERE id = ?').run(count, userId);
+    return false;
+  }
+
+  static clearFailedLogins(userId) {
+    const db = getDatabase();
+    db.prepare('UPDATE users SET failed_login_count = 0, locked_until = NULL WHERE id = ?').run(userId);
   }
 
   static clearResetToken(userId) {
@@ -187,5 +224,8 @@ class User {
     };
   }
 }
+
+User.hashToken = hashToken;
+User.MAX_FAILED_LOGINS = MAX_FAILED_LOGINS;
 
 module.exports = User;

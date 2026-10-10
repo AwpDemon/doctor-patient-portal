@@ -3,7 +3,7 @@ const router = express.Router();
 const User = require('../models/User');
 const Appointment = require('../models/Appointment');
 const Prescription = require('../models/Prescription');
-const { isAuthenticated, requireRole, logAction } = require('../middleware/auth');
+const { isAuthenticated, requireRole, canAccessPatient, logAction } = require('../middleware/auth');
 const { getDatabase } = require('../config/db');
 
 router.use(isAuthenticated);
@@ -87,7 +87,7 @@ router.get('/:id', (req, res) => {
 // ============================================================
 // GET /api/patients/:id/records - Complete patient records
 // ============================================================
-router.get('/:id/records', requireRole('doctor', 'admin'), (req, res) => {
+router.get('/:id/records', requireRole('doctor', 'admin'), canAccessPatient, (req, res) => {
   try {
     const patientId = parseInt(req.params.id);
     const db = getDatabase();
@@ -131,7 +131,7 @@ router.get('/:id/records', requireRole('doctor', 'admin'), (req, res) => {
 // ============================================================
 // GET /api/patients/:id/lab-results - Patient lab results
 // ============================================================
-router.get('/:id/lab-results', (req, res) => {
+router.get('/:id/lab-results', canAccessPatient, (req, res) => {
   try {
     const patientId = parseInt(req.params.id);
 
@@ -148,6 +148,9 @@ router.get('/:id/lab-results', (req, res) => {
       ORDER BY lr.test_date DESC
     `).all(patientId);
 
+    logAction(req.user.id, 'VIEW_LAB_RESULTS', 'lab_results', patientId,
+      `Viewed lab results for patient ${patientId}`, req.ip);
+
     res.json({ labResults: results });
   } catch (err) {
     console.error('Get lab results error:', err);
@@ -158,7 +161,7 @@ router.get('/:id/lab-results', (req, res) => {
 // ============================================================
 // POST /api/patients/:id/lab-results - Add lab result (doctor)
 // ============================================================
-router.post('/:id/lab-results', requireRole('doctor'), (req, res) => {
+router.post('/:id/lab-results', requireRole('doctor'), canAccessPatient, (req, res) => {
   try {
     const patientId = parseInt(req.params.id);
     const db = getDatabase();
@@ -203,7 +206,7 @@ router.post('/:id/lab-results', requireRole('doctor'), (req, res) => {
 // ============================================================
 // GET /api/patients/:id/billing - Patient billing
 // ============================================================
-router.get('/:id/billing', (req, res) => {
+router.get('/:id/billing', canAccessPatient, (req, res) => {
   try {
     const patientId = parseInt(req.params.id);
 
@@ -240,7 +243,7 @@ router.get('/:id/billing', (req, res) => {
 // ============================================================
 // POST /api/patients/:id/billing - Create billing entry (admin)
 // ============================================================
-router.post('/:id/billing', requireRole('admin', 'doctor'), (req, res) => {
+router.post('/:id/billing', requireRole('admin', 'doctor'), canAccessPatient, (req, res) => {
   try {
     const patientId = parseInt(req.params.id);
     const db = getDatabase();
@@ -280,7 +283,7 @@ router.post('/:id/billing', requireRole('admin', 'doctor'), (req, res) => {
 // ============================================================
 // PUT /api/patients/:id/billing/:billId/pay - Mark bill as paid
 // ============================================================
-router.put('/:id/billing/:billId/pay', (req, res) => {
+router.put('/:id/billing/:billId/pay', canAccessPatient, (req, res) => {
   try {
     const patientId = parseInt(req.params.id);
     const billId = parseInt(req.params.billId);

@@ -20,19 +20,22 @@ const path = require('path');
 // Set DB path before importing
 process.env.DB_PATH = process.env.DB_PATH || path.join(__dirname, 'portal.db');
 
-const { getDatabase, closeDatabase } = require('../config/db');
+const { getDatabase, closeDatabase, installAuditTriggers, dropAuditTriggers } = require('../config/db');
 
 async function seed() {
   console.log('Seeding database...\n');
 
   const db = getDatabase();
 
-  // Clear existing data
+  // Clear existing data. The audit log is append-only (database triggers), so
+  // a full demo reset has to lift that guard explicitly and restore it after.
+  dropAuditTriggers();
   const tables = ['notifications', 'billing', 'lab_results', 'prescriptions', 'messages', 'appointments', 'audit_log', 'users'];
   for (const table of tables) {
     db.prepare(`DELETE FROM ${table}`).run();
     db.prepare(`DELETE FROM sqlite_sequence WHERE name = '${table}'`).run();
   }
+  installAuditTriggers();
 
   // ============================================================
   // Users

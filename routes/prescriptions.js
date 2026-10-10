@@ -3,7 +3,7 @@ const router = express.Router();
 const { body, validationResult } = require('express-validator');
 const Prescription = require('../models/Prescription');
 const User = require('../models/User');
-const { isAuthenticated, requireRole, logAction } = require('../middleware/auth');
+const { isAuthenticated, requireRole, hasPatientAccess, logAction } = require('../middleware/auth');
 const { getDatabase } = require('../config/db');
 
 router.use(isAuthenticated);
@@ -54,6 +54,13 @@ router.get('/active', (req, res) => {
       patientId = parseInt(req.query.patient_id);
     } else {
       return res.status(400).json({ error: 'patient_id is required.' });
+    }
+
+    // AC-3: doctors only see medications for their own patients.
+    if (!hasPatientAccess(req.user, patientId)) {
+      logAction(req.user.id, 'ACCESS_DENIED', 'prescriptions', patientId,
+        `Denied active-medication lookup for patient ${patientId}`, req.ip);
+      return res.status(403).json({ error: 'Access denied. You do not have access to this patient.' });
     }
 
     const medications = Prescription.getActiveMedications(patientId);
@@ -109,6 +116,13 @@ router.post('/', requireRole('doctor'), [
     const patient = User.findById(parseInt(req.body.patient_id));
     if (!patient || patient.role !== 'patient') {
       return res.status(400).json({ error: 'Invalid patient.' });
+    }
+
+    // AC-3: a doctor can only prescribe for a patient they have seen.
+    if (!hasPatientAccess(req.user, patient.id)) {
+      logAction(req.user.id, 'ACCESS_DENIED', 'prescriptions', patient.id,
+        `Denied prescription for unassigned patient ${patient.id}`, req.ip);
+      return res.status(403).json({ error: 'Access denied. This patient is not assigned to you.' });
     }
 
     const prescription = Prescription.create({

@@ -11,8 +11,50 @@ function getDatabase() {
     db.pragma('journal_mode = WAL');
     db.pragma('foreign_keys = ON');
     initializeTables();
+    migrateSchema();
+    installAuditTriggers();
   }
   return db;
+}
+
+// Add columns introduced after the original schema to databases created
+// before them. SQLite has no "ADD COLUMN IF NOT EXISTS", so check first.
+function ensureColumn(table, column, definition) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all().map(c => c.name);
+  if (!cols.includes(column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  }
+}
+
+function migrateSchema() {
+  // AC-7: per-account lockout after repeated failed logins
+  ensureColumn('users', 'failed_login_count', 'INTEGER DEFAULT 0');
+  ensureColumn('users', 'locked_until', 'TEXT');
+  // AU-9: hash chain over audit rows (tamper evidence)
+  ensureColumn('audit_log', 'prev_hash', 'TEXT');
+  ensureColumn('audit_log', 'hash', 'TEXT');
+}
+
+// AU-9: the audit log is append-only at the database layer. Application code
+// cannot UPDATE or DELETE audit rows; the seed script drops these triggers
+// explicitly when it resets the demo database.
+function installAuditTriggers() {
+  db.exec(`
+    CREATE TRIGGER IF NOT EXISTS audit_log_no_update
+    BEFORE UPDATE ON audit_log
+    BEGIN SELECT RAISE(ABORT, 'audit_log is append-only'); END;
+
+    CREATE TRIGGER IF NOT EXISTS audit_log_no_delete
+    BEFORE DELETE ON audit_log
+    BEGIN SELECT RAISE(ABORT, 'audit_log is append-only'); END;
+  `);
+}
+
+function dropAuditTriggers() {
+  db.exec(`
+    DROP TRIGGER IF EXISTS audit_log_no_update;
+    DROP TRIGGER IF EXISTS audit_log_no_delete;
+  `);
 }
 
 function initializeTables() {
@@ -175,4 +217,4 @@ function closeDatabase() {
   }
 }
 
-module.exports = { getDatabase, closeDatabase };
+module.exports = { getDatabase, closeDatabase, installAuditTriggers, dropAuditTriggers };
