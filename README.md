@@ -1,181 +1,137 @@
-# HealthBridge — Doctor-Patient Portal
+# HealthBridge: Doctor-Patient Portal
 
 [![ci](https://github.com/AwpDemon/doctor-patient-portal/actions/workflows/ci.yml/badge.svg)](https://github.com/AwpDemon/doctor-patient-portal/actions/workflows/ci.yml)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-![node](https://img.shields.io/badge/node-18%2B-green)
-![express](https://img.shields.io/badge/express-4.x-lightgrey)
+![node](https://img.shields.io/badge/node-20%2B-green)
 
-**University of Georgia · MIST 4610 Data Management and Analytics · Spring 2025**
+**A UGA MIST 4610 group project (Spring 2025).** This is a full-stack patient portal (Node, Express, SQLite,
+vanilla-JS SPA) with role-based access for patients, doctors, and admins. It runs on fictional seed data
+only. **It is a class project, not a production or HIPAA-compliant system.** It does implement and test
+the technical controls HIPAA's Security Rule asks about, and [docs/CONTROL_MAPPING.md](docs/CONTROL_MAPPING.md)
+maps each one to NIST SP 800-53 and 45 CFR 164.312, including what is still missing.
 
-**Highlights**
-- Full-stack SPA (Node + Express + SQLite + vanilla-JS client) with **11 UI modules** and **30+ REST endpoints** across appointments, messaging, prescriptions, billing, labs, and admin.
-- Auth stack with real teeth: bcrypt (12 rounds), session store, **2FA via TOTP** (Google Authenticator compatible), password-reset token flow, rate-limited login, and RBAC splitting doctor / patient / admin views.
-- **21-test Jest/Supertest suite** covers registration, login, reset, 2FA, password change, session lifecycle, RBAC, and rate-limiting — runs green in CI.
-- Database initialized with a **realistic seed**: 3 roles, 4 doctors, 6 patients, prescriptions, lab results, and billing rows, so the demo looks like a populated clinic on first boot.
+## Results at a glance
 
-![Patient Dashboard](docs/screenshots/patient-dashboard.png)
+| | |
+|---|---|
+| API surface | **59 REST endpoints** (auth 12, messages 11, appointments 10, dashboard/admin 9, patients 8, prescriptions 7, plus `/api/health` and `/api/doctors`) |
+| Tests | **55 Jest/Supertest tests, all passing**: 21 auth-flow tests and 34 security/access-control tests |
+| Security self-assessment | **19 control gaps found and fixed in code** (Oct 2026), 18 with a dedicated test and 1 enforced in CI. Run against the original code, 29 of the 34 security tests fail. |
+| Audit logging | 36 event types, including PHI reads; SHA-256 hash-chained, append-only table with a verifier |
+| Dependencies | `npm audit --omit=dev`: **0 advisories** (was 2 critical / 9 high before the fixes), gated in CI |
+
+Examples of what the assessment caught and fixed (full list with evidence links in the
+[control mapping](docs/CONTROL_MAPPING.md#1-gaps-found-and-fixed-in-this-assessment)):
+
+- **MFA bypass.** The "2FA verified" check existed but was never applied. A password alone gave a 2FA user
+  full API access.
+- **Broken object-level authorization.** Any doctor could read any patient's lab results and billing, and
+  any user could read any message thread by id.
+- **Session timeout that never fired.** The code refreshed the "last activity" timestamp *before* checking it.
+- **Reset tokens valid after expiry.** An ISO-vs-SQLite date-string comparison let an expired token work
+  until midnight.
+
+![Patient dashboard](docs/screenshots/patient-dashboard.png)
 
 ## Screens
 
-| Login | Patient Dashboard |
+Real captures of the running app ([`docs/capture_screenshots.js`](docs/capture_screenshots.js), Playwright + Chrome).
+
+| Login | Doctor dashboard |
 |:---:|:---:|
-| ![Login](docs/screenshots/login.png) | ![Patient Dashboard](docs/screenshots/patient-dashboard.png) |
+| ![Login](docs/screenshots/login.png) | ![Doctor dashboard](docs/screenshots/doctor-dashboard.png) |
 
-| Doctor Dashboard | Appointments |
+| Appointments (patient) | Secure messaging |
 |:---:|:---:|
-| ![Doctor Dashboard](docs/screenshots/doctor-dashboard.png) | ![Appointments](docs/screenshots/appointments.png) |
+| ![Appointments](docs/screenshots/appointments.png) | ![Messages](docs/screenshots/messages.png) |
 
-| Secure Messaging | Prescriptions |
+| Prescriptions (patient) | Admin: user management |
 |:---:|:---:|
-| ![Messages](docs/screenshots/messages.png) | ![Prescriptions](docs/screenshots/prescriptions.png) |
+| ![Prescriptions](docs/screenshots/prescriptions.png) | ![Admin](docs/screenshots/admin-users.png) |
 
-*(Screenshots are generated from the real design tokens in `public/css/styles.css` via `docs/build_screenshots.py` — same palette, layout, and typography as the running app.)*
+## Architecture
 
-## What it does
+```mermaid
+flowchart LR
+  B[Browser SPA<br/>public/js] -->|JSON over HTTP<br/>session cookie| E[Express server.js<br/>helmet + CSP]
+  E --> T[trackActivity<br/>idle timeout]
+  T --> R[routes/*]
+  R --> M1[isAuthenticated<br/>password + enforced TOTP]
+  M1 --> M2[requireRole<br/>route-level RBAC]
+  M2 --> M3[hasPatientAccess<br/>object-level checks]
+  M3 --> D[(SQLite<br/>better-sqlite3, WAL)]
+  R --> A[logAction<br/>hash-chained audit_log]
+  A --> D
+  E --> S[SqliteSessionStore<br/>sessions table]
+  S --> D
+```
 
-HealthBridge simulates a real doctor-patient portal end-to-end. Patients can see their upcoming appointments, request refills, view lab results with reference ranges, pay bills, and message their provider. Doctors get a per-day schedule, a patient roster, an inbox with urgent-flagged messages, and prescription/lab-order flows. Admins can manage users and pull the audit log.
-
-It's a class project, so the scope is "one clinic, one week of realistic traffic," not production HIPAA — but the auth and audit pieces are built the way you'd build them for real.
-
-## What I actually learned building it
-
-**Auth is a design problem, not an API problem.** The part of this that took the longest wasn't writing `POST /api/auth/login` — it was deciding where the boundary between "session management" and "route-level authorization" lives, so that adding a new role later didn't mean touching every route. Middleware factory that takes a list of allowed roles and returns a guard, RBAC checks declared at route mount time, single audit helper threaded through the middleware.
-
-**SQLite is shockingly capable for a small realistic demo.** Turning on WAL mode (`PRAGMA journal_mode=WAL`) gets you concurrent reads during writes, which is enough to run a Jest suite, a seed script, and a dev server at the same time without locking. No Postgres to babysit in class or in CI.
-
-**2FA is a UX problem the first time you ship it.** Speakeasy + QR code + a 6-digit verify was the easy part. The hard part was making sure that if a user enables 2FA, the password reset flow still knows about it, and that "disable 2FA" requires re-entering the current password. Lots of "what if the user does X after Y" edge cases.
-
-**Tests that touch the database need to own the database.** The test suite spins up its own SQLite file per `beforeAll` and blows it away after. Trying to share state with the dev DB is how flaky tests are born.
-
-## Tech stack
-
-| Layer | Choice |
-|-------|--------|
-| Server | Node 18 + Express 4 |
-| Data   | SQLite via `better-sqlite3`, WAL mode |
-| Auth   | `express-session` + `connect-sqlite3`, `bcryptjs` (12 rounds), `speakeasy` TOTP |
-| Hardening | `helmet`, CORS allowlist, `express-validator`, per-route rate limits |
-| Client | Vanilla ES6+ SPA (hash router) + Material Symbols |
-| Test   | Jest + Supertest, 21 cases, CI on GitHub Actions |
+A request passes three gates before it reaches patient data: an authenticated, fully MFA'd session; a
+role allowed on that route; and, for patient-scoped data, an access relationship (admin: all; patient:
+self; doctor: patients they have an appointment with). Security-relevant actions and denials go to the
+audit log.
 
 ## Quick start
 
 ```bash
-git clone https://github.com/AwpDemon/doctor-patient-portal.git
-cd doctor-patient-portal
-npm install
-cp .env.example .env        # or set SESSION_SECRET yourself
-npm run seed                # populates SQLite with demo data
+git clone https://github.com/AwpDemon/doctor-patient-portal.git && cd doctor-patient-portal
+npm ci
+cp .env.example .env        # set SESSION_SECRET
+npm run seed                # fictional demo clinic
 npm run dev                 # http://localhost:3000
 ```
 
-### Demo accounts (password `Password123` for all)
+Demo accounts (password `Password123`): `admin@healthbridge.com`, `dr.chen@healthbridge.com`,
+`dr.patel@healthbridge.com`, `john.doe@email.com`, `mary.smith@email.com`, `david.wilson@email.com`.
+All people and records in the seed are fictional.
 
-| Role | Email | Notes |
-|------|-------|-------|
-| Admin | admin@healthbridge.com | Full system access, user management, audit log |
-| Doctor | dr.chen@healthbridge.com | Cardiology, has existing patients |
-| Doctor | dr.patel@healthbridge.com | Family Medicine |
-| Patient | john.doe@email.com | Appointments, prescriptions, lab results |
-| Patient | mary.smith@email.com | Appointments and messages |
-| Patient | david.wilson@email.com | MRI results, active prescriptions |
+## Features
 
-## Feature inventory
+**Security**
+- bcrypt password hashing (cost 12); per-account lockout after 5 failures; per-IP rate limit on login and password reset
+- TOTP two-factor authentication (RFC 6238, works with Google Authenticator), enforced on every API call once enabled
+- Session ID regenerated at login; 30-minute idle timeout; 24-hour absolute lifetime; `HttpOnly`/`SameSite` cookies
+- Role-based access control (patient / doctor / admin) plus per-patient access checks
+- Self-registered doctor accounts held for admin approval
+- Password reset with single-use, 1-hour, hashed tokens
+- Hash-chained, append-only audit log with an admin viewer and a chain verifier
+- helmet security headers including a Content-Security-Policy
 
-### Auth & security
-- Session-based login/logout, registration with role selection
-- Password reset via signed token flow
-- TOTP 2FA (Google Authenticator compatible) with enable / verify / disable
-- Authenticated password change
-- Session inactivity timeout with activity tracking
-- Per-route rate limiting (aggressive on `/login` and `/reset-password`)
-- Role-based access control — doctor / patient / admin each get a different view
-- Audit logging of security-critical actions
-- Password strength indicator with real-time feedback
-
-### Clinical / product
-1. **Dashboard** — role-specific stats, upcoming appointments, quick actions
-2. **Patient Records** — profile with medical-history tabs
-3. **Appointment Scheduling** — book / reschedule / cancel with real-time slot availability
-4. **Secure Messaging** — threaded, urgent-flag, read receipts
-5. **Prescriptions** — create, edit, refill requests, pharmacy details
-6. **Billing & Payments** — invoices, payment processing, insurance split
-7. **Lab Results** — color-coded results with reference ranges
-8. **Profile Management** — personal info, emergency contacts, insurance
-9. **Notifications** — polled panel, categorized by type
-10. **Global Search** — across patients, doctors, appointments, meds
-11. **Admin Panel** — user management, system stats, audit log viewer
-
-## API shape
-
-~30 REST endpoints, grouped by resource. Highlights:
-
-**Auth** — `POST /api/auth/{register,login,logout}`, `GET /api/auth/{session,me}`, password reset (`forgot-password` → `reset-password`), change-password, and the 2FA setup/enable/verify/disable quartet.
-
-**Appointments** — `GET /api/appointments[/upcoming|/today|/available-slots|/stats|/:id]`, `POST /api/appointments`, `PUT /api/appointments/:id`, `PUT /api/appointments/:id/cancel`.
-
-Routes for messages, prescriptions, patients, and dashboard live in their respective files under `routes/`. Each route file is self-contained — RBAC is enforced via middleware at mount time.
-
-## Project layout
-
-```
-doctor-patient-portal/
-├── server.js                 Express entry point + session store + CSP
-├── config/db.js              SQLite init + schema + WAL mode
-├── middleware/auth.js        Session + RBAC + activity tracking
-├── models/                   User, Appointment, Message, Prescription
-├── routes/                   auth, appointments, messages, patients,
-│                             prescriptions, dashboard
-├── public/
-│   ├── css/styles.css        Design system (~1,200 lines)
-│   ├── js/                   SPA router, per-module UI (12 files)
-│   └── index.html            SPA shell
-├── data/seed.js              Demo data for 3 roles, 4 docs, 6 patients
-├── tests/auth.test.js        Jest/Supertest — 21 cases
-├── docs/
-│   ├── build_screenshots.py  Regenerates README renders from CSS tokens
-│   └── screenshots/          6 PNGs referenced above
-├── .github/workflows/ci.yml  npm ci → seed → test → boot + /api/health
-└── .env.example
-```
+**Clinical / product (11 UI modules):** dashboard, patient records, appointment scheduling with slot
+availability, threaded secure messaging, prescriptions and refill requests, billing, lab results with
+reference ranges, profile, notifications, global search, admin panel.
 
 ## Testing
 
 ```bash
-npm test                  # 21 passing
-npx jest --coverage       # coverage report
+npm test            # 55 tests (tests/auth.test.js, tests/security.test.js)
+npm audit --omit=dev
 ```
 
-The suite covers: registration validation, login with valid/invalid/non-existent creds, session read, `/api/auth/me`, full password-reset flow, password change, logout, protected-route 401s, and the `/api/health` endpoint. CI runs the same suite plus a live-server smoke test against `/api/health`.
+`tests/security.test.js` is organized by NIST control (IA-2(1), AC-12, SC-23, AC-7, AC-2, IA-5, AC-3/AC-6,
+AU-9, SC-18), and each test is cited from the control mapping. CI runs the suite, a production-dependency
+audit, and a boot + `/api/health` smoke test on every push.
 
-## Team (MIST 4610 group project)
+## Limitations
 
-| Member | Role | Key contributions |
-|--------|------|-------------------|
-| **Ali Askari** | Lead developer | Architecture, backend API, database schema, auth/2FA |
-| Sarah Mitchell | Frontend | UI/UX, CSS design system, responsive layout, dashboard |
-| James Park | Full stack | Messaging, notifications, global search |
-| Maria Santos | Backend | Patient records, prescriptions, billing, seed data |
-| David Kim | QA | Test suite, security review, lab results, docs |
+This is not production software. The main gaps are listed in the
+[control mapping](docs/CONTROL_MAPPING.md#remaining-gaps): no TLS termination in the repo, no encryption of PHI
+at rest, MFA optional rather than required for clinicians, no external anchor for the audit hash chain, no
+emergency-access procedure, CSRF protection that relies on `SameSite` cookies, and an in-memory IP rate
+limiter. The administrative and physical safeguards HIPAA requires are out of scope for a code repository.
 
-## Timeline
+## Project context and authorship
 
-| Phase | Period | Deliverables |
-|-------|--------|--------------|
-| 1 | Jan – Feb 2025 | Requirements, DB schema, project scaffold |
-| 2 | Feb – Mar 2025 | Auth, user models, initial API |
-| 3 | Mar – Apr 2025 | Appointments, messaging, prescriptions |
-| 4 | Apr – May 2025 | SPA frontend, dashboards, UI polish |
-| 5 | May – Jun 2025 | Billing, labs, search, admin |
-| 6 | Jun – Jul 2025 | Tests, security review, docs |
+HealthBridge started as a group project for UGA MIST 4610 in Spring 2025. I published this repository in
+2026 from that coursework, so its commit history shows the upload and my later work, not the team's
+original development history. The October 2026 security assessment, the fixes, the 34 security tests, and
+the control mapping are my own post-course work.
+
+## Tech stack
+
+Node 20, Express 4, better-sqlite3 (WAL), express-session (custom SQLite store), bcryptjs, speakeasy,
+helmet, express-validator, Jest + Supertest, GitHub Actions.
 
 ## License
 
-MIT — see [`LICENSE`](LICENSE).
-
-## Acknowledgments
-
-- UGA MIST 4610 (Data Management and Analytics) course staff for project guidance
-- [Material Symbols](https://fonts.google.com/icons) icon family
-- [Inter](https://rsms.me/inter/) typeface by Rasmus Andersson
-- SQLite and the `better-sqlite3` maintainers
+MIT. See [`LICENSE`](LICENSE).
